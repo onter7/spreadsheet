@@ -1,7 +1,7 @@
-#pragma once
+﻿#pragma once
 
-#include "cell.h"
 #include "common.h"
+#include "cell.h"
 
 #include <functional>
 #include <memory>
@@ -28,9 +28,16 @@ private:
 	Size printable_size_;
 	std::vector<std::vector<std::unique_ptr<Cell>>> cells_;
 
+	struct PositionHasher {
+		size_t operator()(const Position& pos) const {
+			return static_cast<size_t>(pos.row) + 37 * static_cast<size_t>(pos.col);
+		}
+	};
+
 	void Resize(Position pos);
 	void CheckPosition(Position pos) const;
 	void UpdatePrintableSize();
+	void CheckForCircularDependencies(const Position& src_pos, const std::vector<Position>& referenced_calls, std::unordered_set<Position, PositionHasher>& visited) const;
 
 	struct CellInterfaceValuePrinter {
 		std::ostream& out;

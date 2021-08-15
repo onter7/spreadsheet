@@ -1,7 +1,4 @@
-#include "sheet.h"
-
-#include "cell.h"
-#include "common.h"
+﻿#include "sheet.h"
 
 #include <algorithm>
 #include <functional>
@@ -16,8 +13,16 @@ Sheet::~Sheet() {}
 void Sheet::SetCell(Position pos, std::string text) {
 	CheckPosition(pos);
 	Resize(pos);
+	CellInterface* current_cell = GetCell(pos);
+	if (current_cell && current_cell->GetText() == text) {
+		return;
+	}
+	std::unique_ptr<Cell> tmp = std::make_unique<Cell>(*this);
+	tmp->Set(text);
+	std::unordered_set<Position, PositionHasher> visited;
+	CheckForCircularDependencies(pos, tmp->GetReferencedCells(), visited);
 	if (!cells_[pos.row][pos.col]) {
-		cells_[pos.row][pos.col] = std::make_unique<Cell>();
+		cells_[pos.row][pos.col] = std::make_unique<Cell>(*this);
 	}
 	cells_[pos.row][pos.col]->Set(text);
 	UpdatePrintableSize();
@@ -29,7 +34,7 @@ const CellInterface* Sheet::GetCell(Position pos) const {
 		return nullptr;
 	}
 	const auto& cell = cells_.at(pos.row).at(pos.col);
-	return cell->GetText().empty() ? nullptr : cell.get();
+	return !cell || cell->GetText().empty() ? nullptr : cell.get();
 }
 CellInterface* Sheet::GetCell(Position pos) {
 	CheckPosition(pos);
@@ -37,7 +42,7 @@ CellInterface* Sheet::GetCell(Position pos) {
 		return nullptr;
 	}
 	auto& cell = cells_.at(pos.row).at(pos.col);
-	return cell->GetText().empty() ? nullptr : cell.get();
+	return !cell || cell->GetText().empty() ? nullptr : cell.get();
 }
 
 void Sheet::ClearCell(Position pos) {
@@ -135,6 +140,24 @@ void Sheet::UpdatePrintableSize() {
 	printable_size_ = { max_non_empty_row + 1, max_non_empty_col + 1 };
 }
 
+void Sheet::CheckForCircularDependencies(const Position& src_pos, const std::vector<Position>& referenced_cells, std::unordered_set<Position, PositionHasher>& visited) const {
+	using namespace std::literals;
+	for (const auto& ref_cell_pos : referenced_cells) {
+		if (!ref_cell_pos.IsValid()) {
+			continue;
+		}
+		if (src_pos == ref_cell_pos) {
+			throw CircularDependencyException("Circular dependency found"s);
+		}
+		visited.insert(ref_cell_pos);
+		const CellInterface* ref_cell = GetCell(ref_cell_pos);
+		if (!ref_cell) {
+			continue;
+		}
+		CheckForCircularDependencies(src_pos, ref_cell->GetReferencedCells(), visited);
+	}
+}
+
 void Sheet::CellInterfaceValuePrinter::operator()(const std::string& value) {
 	out << value;
 }
@@ -144,7 +167,7 @@ void Sheet::CellInterfaceValuePrinter::operator()(double value) {
 }
 
 void Sheet::CellInterfaceValuePrinter::operator()(FormulaError value) {
-	out << '#' << value.what() << '!';
+	out << value.ToString();
 }
 
 std::unique_ptr<SheetInterface> CreateSheet() {

@@ -39,4 +39,4 @@ install(
   EXPORT spreadsheet
 )
 
-set_directory_properties(PROPERTIES VS_STARTUP_PROJECT formulaAST)
+set_directory_properties(PROPERTIES VS_STARTUP_PROJECT spreadsheet)
