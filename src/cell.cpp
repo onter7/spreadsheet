@@ -1,4 +1,5 @@
 ﻿#include "cell.h"
+#include "common.h"
 
 #include <algorithm>
 #include <cassert>
@@ -6,6 +7,86 @@
 #include <string>
 #include <optional>
 #include <variant>
+
+class Cell::Impl {
+public:
+	virtual CellInterface::Value GetValue() const = 0;
+	virtual std::string GetText() const = 0;
+	virtual void ClearCache() = 0;
+	virtual std::vector<Position> GetReferencedCells() const = 0;
+};
+
+class Cell::EmptyImpl : public Cell::Impl {
+public:
+	CellInterface::Value GetValue() const override {
+		return {};
+	}
+	std::string GetText() const override {
+		return {};
+	}
+	void ClearCache() override {}
+	std::vector<Position> GetReferencedCells() const override {
+		return {};
+	}
+};
+
+class Cell::TextImpl : public Cell::Impl {
+public:
+	TextImpl(std::string value)
+		: value_(std::move(value)) {
+	}
+	CellInterface::Value GetValue() const override {
+		return value_.front() == ESCAPE_SIGN ? value_.substr(1) : value_;
+	}
+	std::string GetText() const override {
+		return value_;
+	}
+	void ClearCache() override {}
+	std::vector<Position> GetReferencedCells() const override {
+		return {};
+	}
+private:
+	std::string value_;
+};
+
+class Cell::FormulaImpl : public Cell::Impl {
+public:
+	FormulaImpl(const SheetInterface& sheet, std::string text)
+		: sheet_(sheet) {
+		using namespace std::literals;
+		try {
+			formula_ = ParseFormula(text);
+		}
+		catch (...) {
+			throw FormulaException("Formula parsing error"s);
+		}
+	}
+	CellInterface::Value GetValue() const override {
+		if (cached_value_ != std::nullopt) {
+			return cached_value_.value();
+		}
+		auto result{ formula_->Evaluate(sheet_) };
+		if (std::holds_alternative<double>(result)) {
+			return std::get<double>(result);
+		}
+		else {
+			return std::get<FormulaError>(result);
+		}
+	}
+	std::string GetText() const override {
+		return FORMULA_SIGN + formula_->GetExpression();
+	}
+	void ClearCache() override {
+		cached_value_ = std::nullopt;
+	}
+	std::vector<Position> GetReferencedCells() const override {
+		return formula_->GetReferencedCells();
+	}
+private:
+	const SheetInterface& sheet_;
+	std::unique_ptr<FormulaInterface> formula_;
+	std::optional<CellInterface::Value> cached_value_;
+};
 
 Cell::Cell(SheetInterface& sheet)
 	: impl_(std::make_unique<EmptyImpl>())
@@ -19,7 +100,7 @@ void Cell::Set(std::string text) {
 	if (text.empty()) {
 		tmp = std::make_unique<EmptyImpl>();
 	}
-	else if (text[0] == '=' && text.size() > 1u) {
+	else if (text[0] == FORMULA_SIGN && text.size() > 1u) {
 		tmp = std::make_unique<FormulaImpl>(sheet_, text.substr(1));
 	}
 	else {
@@ -44,74 +125,6 @@ std::string Cell::GetText() const {
 
 std::vector<Position> Cell::GetReferencedCells() const {
 	return referenced_cells_;
-}
-
-CellInterface::Value Cell::EmptyImpl::GetValue() const {
-	return {};
-}
-
-std::string Cell::EmptyImpl::GetText() const {
-	return {};
-}
-
-void Cell::EmptyImpl::ClearCache() {}
-
-std::vector<Position> Cell::EmptyImpl::GetReferencedCells() const {
-	return {};
-}
-
-Cell::TextImpl::TextImpl(std::string value)
-	: value_(std::move(value)) {
-}
-
-CellInterface::Value Cell::TextImpl::GetValue() const {
-	return value_.front() == '\'' ? value_.substr(1) : value_;
-}
-
-std::string Cell::TextImpl::GetText() const {
-	return value_;
-}
-
-void Cell::TextImpl::ClearCache() {}
-
-std::vector<Position> Cell::TextImpl::GetReferencedCells() const {
-	return {};
-}
-
-Cell::FormulaImpl::FormulaImpl(const SheetInterface& sheet, std::string text)
-	: sheet_(sheet) {
-	using namespace std::literals;
-	try {
-		formula_ = ParseFormula(text);
-	}
-	catch (...) {
-		throw FormulaException("Formula parsing error"s);
-	}
-}
-
-Cell::Value Cell::FormulaImpl::GetValue() const {
-	if (cached_value_ != std::nullopt) {
-		return cached_value_.value();
-	}
-	auto result{ formula_->Evaluate(sheet_) };
-	if (std::holds_alternative<double>(result)) {
-		return std::get<double>(result);
-	}
-	else {
-		return std::get<FormulaError>(result);
-	}
-}
-
-std::string Cell::FormulaImpl::GetText() const {
-	return '=' + formula_->GetExpression();
-}
-
-void Cell::FormulaImpl::ClearCache() {
-	cached_value_ = std::nullopt;
-}
-
-std::vector<Position> Cell::FormulaImpl::GetReferencedCells() const {
-	return formula_->GetReferencedCells();
 }
 
 void Cell::ClearDependentCellsCache() {

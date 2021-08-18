@@ -35,9 +35,10 @@ private:
 	};
 
 	void Resize(Position pos);
-	void CheckPosition(Position pos) const;
+	void ThrowIfInvalidPosition(Position pos) const;
 	void UpdatePrintableSize();
-	void CheckForCircularDependencies(const Position& src_pos, const std::vector<Position>& referenced_calls, std::unordered_set<Position, PositionHasher>& visited) const;
+	void ThrowIfCircularDependencyFound(const Position& src_pos, const std::vector<Position>& referenced_calls, std::unordered_set<Position, PositionHasher>& visited) const;
+	CellInterface* GetCellImpl(Position pos) const;
 
 	struct CellInterfaceValuePrinter {
 		std::ostream& out;

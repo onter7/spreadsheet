@@ -1,7 +1,6 @@
 ﻿#include "sheet.h"
 
 #include <algorithm>
-#include <functional>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -11,7 +10,7 @@ using namespace std::literals;
 Sheet::~Sheet() {}
 
 void Sheet::SetCell(Position pos, std::string text) {
-	CheckPosition(pos);
+	ThrowIfInvalidPosition(pos);
 	Resize(pos);
 	CellInterface* current_cell = GetCell(pos);
 	if (current_cell && current_cell->GetText() == text) {
@@ -20,7 +19,7 @@ void Sheet::SetCell(Position pos, std::string text) {
 	std::unique_ptr<Cell> tmp = std::make_unique<Cell>(*this);
 	tmp->Set(text);
 	std::unordered_set<Position, PositionHasher> visited;
-	CheckForCircularDependencies(pos, tmp->GetReferencedCells(), visited);
+	ThrowIfCircularDependencyFound(pos, tmp->GetReferencedCells(), visited);
 	if (!cells_[pos.row][pos.col]) {
 		cells_[pos.row][pos.col] = std::make_unique<Cell>(*this);
 	}
@@ -29,24 +28,14 @@ void Sheet::SetCell(Position pos, std::string text) {
 }
 
 const CellInterface* Sheet::GetCell(Position pos) const {
-	CheckPosition(pos);
-	if (pos.row >= sheet_size_.rows || pos.col >= sheet_size_.cols) {
-		return nullptr;
-	}
-	const auto& cell = cells_.at(pos.row).at(pos.col);
-	return !cell || cell->GetText().empty() ? nullptr : cell.get();
+	return GetCellImpl(pos);
 }
 CellInterface* Sheet::GetCell(Position pos) {
-	CheckPosition(pos);
-	if (pos.row > sheet_size_.rows - 1 || pos.col > sheet_size_.cols - 1) {
-		return nullptr;
-	}
-	auto& cell = cells_.at(pos.row).at(pos.col);
-	return !cell || cell->GetText().empty() ? nullptr : cell.get();
+	return GetCellImpl(pos);
 }
 
 void Sheet::ClearCell(Position pos) {
-	CheckPosition(pos);
+	ThrowIfInvalidPosition(pos);
 	if (pos.row > sheet_size_.rows - 1 || pos.col > sheet_size_.cols - 1) {
 		return;
 	}
@@ -96,27 +85,19 @@ void Sheet::PrintTexts(std::ostream& output) const {
 }
 
 void Sheet::Resize(Position pos) {
-	if (pos.row >= sheet_size_.rows || pos.col >= sheet_size_.cols) {
-		const int rows = pos.row + 1;
-		if (rows > sheet_size_.rows) {
-			const int old_rows = sheet_size_.rows;
-			cells_.resize(rows);
-			for (int row = old_rows; row < rows; ++row) {
-				cells_[row].resize(sheet_size_.cols);
-			}
-			sheet_size_.rows = rows;
-		}
-		const int cols = pos.col + 1;
-		if (cols > sheet_size_.cols) {
-			for (auto& row : cells_) {
-				row.resize(cols);
-			}
-			sheet_size_.cols = cols;
-		}
+	const int old_rows = sheet_size_.rows;
+	sheet_size_.rows = std::max(pos.row + 1, sheet_size_.rows);
+	sheet_size_.cols = std::max(pos.col + 1, sheet_size_.cols);
+	cells_.resize(sheet_size_.rows);
+	for (int row = old_rows; row < sheet_size_.rows; ++row) {
+		cells_[row].resize(sheet_size_.cols);
+	}
+	for (auto& row : cells_) {
+		row.resize(sheet_size_.cols);
 	}
 }
 
-void Sheet::CheckPosition(Position pos) const {
+void Sheet::ThrowIfInvalidPosition(Position pos) const {
 	if (!pos.IsValid()) {
 		throw InvalidPositionException("Position {"s + std::to_string(pos.row) + ","s + std::to_string(pos.col) + "} is invalid"s);
 	}
@@ -140,7 +121,7 @@ void Sheet::UpdatePrintableSize() {
 	printable_size_ = { max_non_empty_row + 1, max_non_empty_col + 1 };
 }
 
-void Sheet::CheckForCircularDependencies(const Position& src_pos, const std::vector<Position>& referenced_cells, std::unordered_set<Position, PositionHasher>& visited) const {
+void Sheet::ThrowIfCircularDependencyFound(const Position& src_pos, const std::vector<Position>& referenced_cells, std::unordered_set<Position, PositionHasher>& visited) const {
 	using namespace std::literals;
 	for (const auto& ref_cell_pos : referenced_cells) {
 		if (!ref_cell_pos.IsValid()) {
@@ -154,8 +135,17 @@ void Sheet::CheckForCircularDependencies(const Position& src_pos, const std::vec
 		if (!ref_cell) {
 			continue;
 		}
-		CheckForCircularDependencies(src_pos, ref_cell->GetReferencedCells(), visited);
+		ThrowIfCircularDependencyFound(src_pos, ref_cell->GetReferencedCells(), visited);
 	}
+}
+
+CellInterface* Sheet::GetCellImpl(Position pos) const {
+	ThrowIfInvalidPosition(pos);
+	if (pos.row > sheet_size_.rows - 1 || pos.col > sheet_size_.cols - 1) {
+		return nullptr;
+	}
+	auto& cell = cells_.at(pos.row).at(pos.col);
+	return !cell || cell->GetText().empty() ? nullptr : cell.get();
 }
 
 void Sheet::CellInterfaceValuePrinter::operator()(const std::string& value) {
